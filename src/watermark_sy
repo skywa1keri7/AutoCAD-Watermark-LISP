@@ -1,0 +1,119 @@
+;;; ============================================================
+;;; 水印插件 - AutoLISP
+;;; 命令: SY (水印首字母)
+;;; 功能: 在图纸右下角自动添加"张文新制造"灰色水印
+;;; 作者: AutoLISP Expert
+;;; ============================================================
+
+(defun C:SY ( / *error*
+               doc layer_name wm_text
+               viewctr viewsize view_h view_w
+               pos_x pos_y txt_h
+               ss ent old_layer old_clayer
+             )
+
+  ;; ── 错误处理 ──────────────────────────────────────────────
+  (defun *error* (msg)
+    (if old_clayer (setvar "CLAYER" old_clayer))
+    (if (not (member msg '("函数被取消" "quit / exit abort" "console break")))
+      (princ (strcat "\n[SY] 错误: " msg))
+    )
+    (princ)
+  )
+
+  ;; ── 基本变量 ──────────────────────────────────────────────
+  (setq layer_name "Watermark_Layer"
+        wm_text    "张文新制造"
+        old_clayer (getvar "CLAYER")
+  )
+
+  ;; ── 1. 创建 / 确认图层 ────────────────────────────────────
+  (if (not (tblsearch "LAYER" layer_name))
+    (progn
+      (command "._-LAYER" "_Make" layer_name
+                          "_Color" "8" layer_name
+                          "")
+      (princ (strcat "\n[SY] 图层 "" layer_name "" 已创建，颜色=8（灰色）。"))
+    )
+    (progn
+      ;; 图层已存在，确保颜色为 8
+      (command "._-LAYER" "_Color" "8" layer_name "")
+      (princ (strcat "\n[SY] 图层 "" layer_name "" 已存在，颜色已确认为 8。"))
+    )
+  )
+
+  ;; ── 2. 计算视图范围，定位右下角 ───────────────────────────
+  ;;   VIEWCTR  → 视图中心 (WCS)
+  ;;   VIEWSIZE → 视图高度 (WCS 单位)
+  (setq viewctr  (getvar "VIEWCTR")   ; (x y)
+        viewsize (getvar "VIEWSIZE")   ; 高度
+  )
+  ;; 宽度 = 高度 × (屏幕宽/屏幕高)
+  (setq view_h viewsize
+        view_w (* viewsize (/ (car  (getvar "SCREENSIZE"))
+                              (cadr (getvar "SCREENSIZE"))))
+  )
+  ;; 文字高度 = 视图高度 × 2%
+  (setq txt_h (* view_h 0.02))
+
+  ;; 右下角坐标（留 1 个字高的边距，避免紧贴边缘）
+  (setq pos_x (+ (car  viewctr) (* view_w 0.5) (- (* txt_h 1.0)))
+        pos_y (+ (cadr viewctr) (* view_h -0.5) (* txt_h 1.5))
+  )
+
+  ;; ── 3. 切换到水印图层，绘制文字 ───────────────────────────
+  (setvar "CLAYER" layer_name)
+
+  (entmake
+    (list
+      '(0 . "TEXT")
+      (cons 8  layer_name)                      ; 图层
+      (cons 10 (list pos_x pos_y 0.0))          ; 插入点
+      (cons 40 txt_h)                           ; 文字高度
+      (cons 1  wm_text)                         ; 文字内容
+      (cons 72 2)                               ; 水平对齐: 右对齐
+      (cons 73 1)                               ; 垂直对齐: 中间
+      (cons 11 (list pos_x pos_y 0.0))          ; 对齐基点
+      (cons 50 0.0)                             ; 旋转角度
+    )
+  )
+
+  ;; ── 4. 设置透明度（需 AutoCAD 2011+，TRANSPARENCY 属性）──
+  ;;   通过修改最新生成实体的 transparency 组码 440
+  (setq ent (entlast))
+  (if ent
+    (progn
+      ;; 透明度值: 0=不透明, 90(整数) 对应约 70% 透明
+      ;; 组码 440: bit 0-7 alpha (0=完全透明,255=不透明)
+      ;; 70% 透明 → alpha ≈ 77 (255×0.30)
+      ;; 编码: (lsh alpha 24) 但 entmod 接受整数
+      ;; AutoCAD 透明度整数 = (1 - opacity)*100 存为对象透明度
+      ;; 安全做法：用 entmod 写 440 组码
+      (entmod
+        (append
+          (entget ent)
+          (list (cons 440 (+ (* 77 16777216) 0)))  ; ~70% 透明
+        )
+      )
+      (princ "\n[SY] 已设置约 70% 透明度。")
+    )
+  )
+
+  ;; ── 5. 恢复原图层 ─────────────────────────────────────────
+  (setvar "CLAYER" old_clayer)
+
+  ;; ── 6. 刷新视图 ───────────────────────────────────────────
+  (command "._REGEN")
+
+  (princ
+    (strcat "\n[SY] 水印「" wm_text
+            "」已添加至右下角，图层: " layer_name
+            "，字高: " (rtos txt_h 2 2)
+    )
+  )
+  (princ)
+)
+
+;;; ── 加载提示 ───────────────────────────────────────────────
+(princ "\n[SY] 水印插件已加载。输入命令 SY 即可在右下角添加水印。")
+(princ)
